@@ -24,7 +24,11 @@ Backend per la gestione del ciclo di vita delle licenze software, denominato **S
 | File | Descrizione |
 |---|---|
 | `Analisi_Servizio_Gestione_Licenze_v2.docx` / `.odt` | Analisi originale del team (con lacune rispetto alle direttive di Alvise) |
-| `Analisi_Servizio_Gestione_Licenze_v3.md` | Analisi aggiornata con tutte le correzioni di Alvise |
+| `Analisi_Servizio_Gestione_Licenze_v2_AGGIORNATA.md` / `.docx` | Versione v2 con correzioni intermedie |
+| `Analisi_Servizio_Gestione_Licenze_v3.md` | Analisi con correzioni di Alvise (sezioni 1–5) |
+| `Analisi_Servizio_Gestione_Licenze_v4_correzioni.md` | **Versione corrente** — estende v3 con error handling, idempotenza, sicurezza, edge case |
+| `v3_to_v4_CHANGELOG.md` | Changelog dettagliato delle novità v3→v4 |
+| `ERROR_REFERENCE_MATRIX.md` | Matrice di riferimento di tutti i codici errore |
 | `Flowchart_Servizio_Gestione_Licenze.md` | 9 diagrammi Mermaid del flusso completo (richiesti da Luca) |
 | `Riepilogo servizio fatturazione.md` | Verbale della riunione del 04/06/2026 con le direttive di Alvise |
 
@@ -39,23 +43,26 @@ Il server è **passivo**: risponde alle chiamate, non le inizia (unica eccezione
 
 ## Endpoint principali
 
-### Client (C1–C6)
+### Client (C1–C7b)
 - `C1 POST /api/client/register` — registrazione automatica all'installazione
-- `C2 POST /api/client/verify-otp` — verifica OTP, attiva trial, genera license_key
+- `C2 POST /api/client/verify-otp` — verifica OTP, attiva trial, genera license_key *(idempotente)*
 - `C3 POST /api/client/resend-otp` — nuovo OTP se scaduto
 - `C4 GET /api/client/license/status` — check periodico (frequenza configurabile in DB)
 - `C5 GET /api/client/messages` — poll messaggi in-app
 - `C6 POST /api/client/token/refresh` — rinnovo JWT
+- `C7 POST /api/client/change-email` — avvia cambio email con OTP *(nuovo in v4)*
+- `C7b POST /api/client/verify-email-change` — verifica OTP per confermare cambio email *(nuovo in v4)*
 
-### Fornitore (F1–F8)
+### Fornitore (F1–F9)
 - `F1 POST /api/vendor/auth/login` — autenticazione con API key
 - `F2 POST /api/vendor/token/refresh` — rinnovo token fornitore
-- `F3 GET /api/vendor/registrations/new` — nuove iscrizioni da processare
-- `F4 POST /api/vendor/registrations/confirm` — conferma ricezione iscrizioni
-- `F5 POST /api/vendor/license/activate` — attivazione licenza a pagamento
+- `F3 GET /api/vendor/registrations/new` — nuove iscrizioni da processare (paginato: `?page=1&limit=50`)
+- `F4 POST /api/vendor/registrations/confirm` — conferma ricezione iscrizioni *(idempotente)*
+- `F5 POST /api/vendor/license/activate` — attivazione licenza a pagamento *(idempotente via `Idempotency-Key` header)*
 - `F6 POST /api/vendor/products` — registrazione nuovo prodotto
 - `F7 POST /api/vendor/client/billing` — dati fatturazione al primo acquisto
 - `F8 POST /api/vendor/license/revoke` — revoca licenza
+- `F9 POST /api/vendor/auth/rotate-key` — rotation API key vendor *(nuovo in v4)*
 
 ### Uscente (O1)
 - `O1 GET {vendor_erp_url}/alarm` — GET ALARM verso ERP fornitore
@@ -72,6 +79,10 @@ Il server è **passivo**: risponde alle chiamate, non le inizia (unica eccezione
 
 `vendors`, `vendor_tokens`, `products`, `clients`, `client_billing`, `otp_codes`, `contratti`, `client_tokens`, `modules`, `contratto_modules`, `messages`, `email_templates`, `client_activity_logs`, `alarm_logs`
 
+**Nuove in v4:** `otp_attempts` (tentativi OTP falliti), `rate_limits` (rate limiting per IP/client), `idempotency_keys` (cache risposte F5)
+
+**Aggiornate in v4:** `vendors` (+`api_key_hash`, `api_key_revoked_at`, `api_key_history`), `alarm_logs` (+`retry_count`, `last_retry_at`, `next_retry_at`, `max_retries`)
+
 > La tabella ponte cliente-prodotto-moduli si chiama **`contratti`** (nomenclatura stabilita da Alvise).
 
 ## Punti chiave dell'analisi v3 (correzioni rispetto a v2)
@@ -86,6 +97,15 @@ Il server è **passivo**: risponde alle chiamate, non le inizia (unica eccezione
 8. **Email fallback GET ALARM** — inviata al fornitore se ERP non raggiungibile
 9. **Validazione P.IVA esterna** — da valutare (es. VIES per clienti EU)
 
+## Novità v4 (pronto per implementazione)
+
+1. **Error handling standardizzato** — 60+ codici errore per ogni endpoint, formato JSON uniforme con `error_code`, `message`, `details`, `timestamp`, `request_id`
+2. **Idempotenza** — C2 (check-before-create), F4 (idempotent UPDATE), F5 (Idempotency-Key header + tabella `idempotency_keys`, cache 24h)
+3. **Sicurezza tecnica** — JWT RS256 (TTL 60s), refresh token (TTL 1h), license_key via HMAC-SHA256, OTP SHA256 in DB (max 3 tentativi, lockout 30min), API key vendor bcrypt rounds=12, rate limiting su C1/C3/F1
+4. **Design API completato** — HTTP status esatti per ogni endpoint (es. C1→201, C2→200, F5→201), response body completi, paginazione F3 (`?page&limit`, max 100)
+5. **Nuovi endpoint** — C7/C7b (cambio email con OTP), F9 (rotation API key vendor)
+6. **Scenari edge-case** — O1 retry ogni 15min (max 3, poi email fallback), C2 con O1 parziale (HTTP 500 ma JWT+license_key ritornati al client), provisional→standard via F5, idempotency recovery su timeout F5, offline >7 giorni
+
 ## Visualizzare i diagrammi
 
 Aprire `Flowchart_Servizio_Gestione_Licenze.md` in VS Code con `Ctrl+Shift+V`.
@@ -95,8 +115,6 @@ In alternativa i diagrammi si vedono direttamente su GitHub.
 ## Domande aperte (da risolvere col team)
 
 - Quale provider email usare (SendGrid, Mailgun, ecc.)?
-- Quanto tempo può funzionare un client offline prima del blocco?
-- Comportamento alla scadenza del token offline: blocco immediato o modalità di grazia?
-- Servizio esterno per validazione P.IVA: quale e a che costo?
-- Passaggio automatico da `provisional` a `standard` dopo conferma pagamento?
+- Comportamento alla scadenza dell'`offline_token`: blocco immediato, modalità di grazia 3 giorni, o downgrade funzioni? (v4 sezione 11.5 documenta i 3 scenari)
+- Servizio esterno per validazione P.IVA: quale e a che costo? (VIES per EU)
 - Pannello di amministrazione per il Service Invoice: sì o no?
