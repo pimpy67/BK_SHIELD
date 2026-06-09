@@ -6,7 +6,7 @@
 > - Aggiunta Sicurezza Tecnica (Sezione 8): algoritmi JWT, generazione license_key, OTP, rate limiting
 > - Completato Design API (Sezione 9): HTTP status codes, response body esatti, paginazione
 > - Aggiunti 2 endpoint nuovi: C7 (cambio email), F9 (rotation API key)
-> - Aggiunti scenari edge-case (Sezione 11): timeout O1, fallimento parziale C2, provisional→standard
+> - Aggiunti scenari edge-case (Sezione 11): timeout O1, fallimento parziale C2, trial→monthly/annual
 
 ---
 
@@ -450,7 +450,7 @@ HTTP 500 Internal Server Error
   "message": "Errore nel salvataggio della licenza. Contatta il supporto.",
   "details": {
     "phase": "creating_license",
-    "operation": "contratti_insert"
+    "operation": "licenses_insert"
   },
   "timestamp": "2026-06-08T15:30:00Z",
   "request_id": "550e8400-e29b-41d4-a716-446655440000"
@@ -973,7 +973,7 @@ HTTP 404 Not Found
 ```json
 {
   "license_key": "lk_new_6f8d3c1a2b9e4f5c8a1b2c3d4e5f6g7h",
-  "license_type": "standard",
+  "license_type": "annual",
   "status": "active",
   "starts_at": "2026-06-08T23:59:59Z",
   "expires_at": "2027-06-08T23:59:59Z",
@@ -1239,7 +1239,7 @@ Risposta: HTTP 200 OK (STESSI DATI della licenza, nessun duplicato)
 
 ```sql
 -- Verificare se esiste già una licenza attiva per questo cliente
-SELECT * FROM contratti 
+SELECT * FROM licenses 
 WHERE client_id = ? 
   AND product_id = ? 
   AND status = 'active' 
@@ -1291,7 +1291,7 @@ Risposta: HTTP 200 OK
 
 ```sql
 -- Aggiornare solo i record che non sono già confermati
-UPDATE contratti 
+UPDATE licenses 
 SET vendor_synced = true 
 WHERE id IN (1, 2, 3) 
   AND vendor_synced = false;
@@ -1323,7 +1323,7 @@ Body: {
   "vat_number": "12345678901",
   "country": "IT",
   "product_key": "FATTURA-2026",
-  "license_type": "standard",
+  "license_type": "annual",
   "starts_at": "2026-06-08T23:59:59Z",
   "expires_at": "2027-06-08T23:59:59Z",
   "max_users": 10,
@@ -1347,7 +1347,7 @@ Body: {
   "vat_number": "12345678901",
   "country": "IT",
   "product_key": "FATTURA-2026",
-  "license_type": "standard",
+  "license_type": "annual",
   "starts_at": "2026-06-08T23:59:59Z",
   "expires_at": "2027-06-08T23:59:59Z",
   "max_users": 10,
@@ -2177,7 +2177,7 @@ Client chiama C2 (verify-otp)
 
 Operazioni in transazione DB:
 1. ✅ Attiva cliente (clients.status → active)
-2. ✅ Crea licenza (contratti INSERT)
+2. ✅ Crea licenza (licenses INSERT)
 3. ✅ Genera JWT e refresh token (client_tokens INSERT)
 4. ✅ Genera offline_token
 5. ❌ Invia GET ALARM verso ERP (timeout, non completato)
@@ -2235,21 +2235,21 @@ if response.status === 500 AND response.error_code === 'GET_ALARM_FAILED':
 
 ---
 
-## 11.3 Passaggio Provisional → Standard (rinnovo licenza a pagamento)
+## 11.3 Rinnovo licenza a pagamento (trial → monthly/annual)
 
 ### Scenario
 
 ```
-T0: Client ha licenza provisional (30 giorni)
+T0: Client ha licenza trial attiva
     - status: "active"
-    - license_type: "provisional"
+    - license_type: "trial"
     - expires_at: 2026-07-08
 
 T20: Client paga il rinnovo
     - Vendor conferma pagamento nel suo ERP
     - Vendor chiama F5 (license/activate) con:
       - vat_number, product_key (stessi del cliente)
-      - license_type: "standard"
+      - license_type: "annual"  (oppure "monthly")
       - starts_at: 2026-06-08T23:59:59Z
       - expires_at: 2027-06-08T23:59:59Z
       - max_users: 10
@@ -2261,17 +2261,17 @@ T20: Client paga il rinnovo
 
 ```
 1. Ricerca il cliente con vat_number + country + product_key
-2. Ricerca la LICENZA ATTIVA PRECEDENTE (provisional o standard)
+2. Ricerca la LICENZA ATTIVA PRECEDENTE (trial, monthly o annual)
 3. Confronta le date:
    - Nuova starts_at è prima della scadenza di vecchia → overlap OK
    - Nuova starts_at è dopo la scadenza di vecchia → gap OK
-4. Disattiva licenza vecchia: contratti.status → expired, deactivated_at = now
+4. Disattiva licenza vecchia: licenses.status → expired, deactivated_at = now
 5. CREA NUOVA licenza:
    - Genera nuova license_key
-   - license_type: "standard"
+   - license_type: "annual" (o "monthly")
    - status: "active"
    - vendor_synced: false (non ancora confermato dal vendor)
-6. Genera nuovo offline_token per licenza standard
+6. Genera nuovo offline_token per nuova licenza
 7. Ritorna con HTTP 201 Created
 ```
 
@@ -2281,16 +2281,16 @@ T20: Client paga il rinnovo
 HTTP 201 Created
 
 {
-  "license_key": "lk_new_standard_8a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1",
-  "license_type": "standard",
+  "license_key": "lk_new_annual_8a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1",
+  "license_type": "annual",
   "status": "active",
   "starts_at": "2026-06-08T23:59:59Z",
   "expires_at": "2027-06-08T23:59:59Z",
   "max_users": 10,
   "modules": [1, 2, 3],
   "offline_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "previous_license_key": "lk_old_provisional_xxx",
-  "message": "Licenza aggiornata da provvisoria a standard"
+  "previous_license_key": "lk_old_trial_xxx",
+  "message": "Licenza aggiornata da trial ad annuale"
 }
 ```
 
@@ -2348,8 +2348,8 @@ Risultato trovato! → Ritorna la STESSA response del primo tentativo:
 
 HTTP 201 Created
 {
-  "license_key": "lk_new_standard_8a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1",
-  "license_type": "standard",
+  "license_key": "lk_new_annual_8a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1",
+  "license_type": "annual",
   "status": "active",
   ...
 }
@@ -2419,7 +2419,7 @@ Quale comportamento adottare quando offline_token scade?
 - ✅ Idempotenza (C2, F4, F5 con Idempotency-Key)
 - ✅ Sicurezza tecnica (JWT RS256, license_key HMAC, OTP hashing, bcrypt API key, rate limiting)
 - ✅ Design API completato (HTTP status, response body precisi, paginazione)
-- ✅ Scenari edge-case (O1 retry, C2 parziale, provisional→standard, idempotency recovery, offline >7gg)
+- ✅ Scenari edge-case (O1 retry, C2 parziale, trial→monthly/annual, idempotency recovery, offline >7gg)
 
 ---
 

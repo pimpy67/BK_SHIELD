@@ -72,23 +72,20 @@ Il server è **passivo**: risponde alle chiamate, non le inizia (unica eccezione
 | Tipo | Codice | Descrizione |
 |---|---|---|
 | Trial Demo | `trial` | Prova gratuita, durata/moduli configurabili per prodotto |
-| Standard | `standard` | Licenza a pagamento mensile o annuale |
-| Provvisoria | `provisional` | Stessa della standard ma breve (~30 gg), in attesa di pagamento |
+| Mensile | `monthly` | Licenza a pagamento a rinnovo mensile |
+| Annuale | `annual` | Licenza a pagamento a rinnovo annuale |
 
 ## Tabelle DB principali
 
-`vendors`, `vendor_tokens`, `products`, `clients`, `client_billing`, `otp_codes`, `contratti`, `client_tokens`, `modules`, `contratto_modules`, `messages`, `email_templates`, `client_activity_logs`, `alarm_logs`
+`vendors`, `vendor_tokens`, `products`, `clients`, `client_billing`, `otp_codes`, `licenses`, `client_tokens`, `modules`, `license_modules`, `messages`, `email_templates`, `client_activity_logs`, `alarm_logs`
 
 **Nuove in v4:** `otp_attempts` (tentativi OTP falliti), `rate_limits` (rate limiting per IP/client), `idempotency_keys` (cache risposte F5)
 
 **Aggiornate in v4:** `vendors` (+`api_key_hash`, `api_key_revoked_at`, `api_key_history`), `alarm_logs` (+`retry_count`, `last_retry_at`, `next_retry_at`, `max_retries`)
 
-> La tabella ponte cliente-prodotto-moduli si chiama **`contratti`** (nomenclatura stabilita da Alvise).
-
 ## Punti chiave dell'analisi v3 (correzioni rispetto a v2)
 
-1. **Licenza Provvisoria** — terzo tipo aggiunto
-2. **Validazione offline** — `offline_token` crittografato salvato localmente dal client
+1. **Validazione offline** — `offline_token` crittografato salvato localmente dal client
 3. **Frequenza check configurabile** — `license_check_frequency_days` in tabella `products`
 4. **Template email in DB** — tabella `email_templates` con chiavi `{placeholder}`, nessun testo hardcoded
 5. **Dati fatturazione separati** — raccolti solo al primo acquisto (tabella `client_billing`)
@@ -118,3 +115,4 @@ In alternativa i diagrammi si vedono direttamente su GitHub.
 - Comportamento alla scadenza dell'`offline_token`: blocco immediato, modalità di grazia 3 giorni, o downgrade funzioni? (v4 sezione 11.5 documenta i 3 scenari)
 - Servizio esterno per validazione P.IVA: quale e a che costo? (VIES per EU)
 - Pannello di amministrazione per il Service Invoice: sì o no?
+- IBAN del cliente in `client_billing`: necessario solo se il fornitore usa addebito diretto SEPA, altrimenti il pagamento vive nell'ERP del fornitore.
