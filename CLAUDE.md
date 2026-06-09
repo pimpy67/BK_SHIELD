@@ -34,7 +34,8 @@ Backend per la gestione del ciclo di vita delle licenze software, denominato **S
 | `Analisi_Servizio_Gestione_Licenze_v4_correzioni.md` | **Analisi tecnica master** — endpoint, errori, sicurezza, idempotenza, edge case |
 | `Analisi_Servizio_Gestione_Licenze_v4_correzioni.docx` | Versione Word dell'analisi v4 |
 | `ERROR_REFERENCE_MATRIX.md` | Matrice di riferimento di tutti i codici errore |
-| `Flowchart_Servizio_Gestione_Licenze.md` | 9 diagrammi Mermaid del flusso completo (richiesti da Luca) |
+| `Endpoint_Servizio_Gestione_Licenze_v5.md` | **Riferimento endpoint da presentare** — scopo, request body commentato, controlli, risposte JSON per tutti gli endpoint C1–C7b, F1–F9, O1 (aggiornato a v4 + sezione 12) |
+| `Flowchart_Servizio_Gestione_Licenze.md` | 13 diagrammi Mermaid del flusso completo (richiesti da Luca; Diag.10–13 aggiunti per sezione 12) |
 | `Riepilogo servizio fatturazione.md` | Verbale della riunione del 04/06/2026 con le direttive di Alvise |
 | `Piano_di_Progetto_Servizio_Gestione_Licenze (to_do).docx` | Piano di progetto con 12 TO-DO, stime e analisi rischi |
 | `sviluppo_v0.md` | Guida di avvio sviluppo backend — decisioni pre-OK, struttura progetto, Gantt |
@@ -54,7 +55,7 @@ Il server è **passivo**: risponde alle chiamate, non le inizia (unica eccezione
 
 ### Client (C1–C7b)
 - `C1 POST /api/client/register` — registrazione automatica all'installazione
-- `C2 POST /api/client/verify-otp` — verifica OTP, attiva trial, genera license_key *(idempotente)*
+- `C2 POST /api/client/verify-otp` — verifica OTP, attiva trial, genera license_key, imposta `vendor_synced=false` *(idempotente; non chiama O1 direttamente — sezione 12)*
 - `C3 POST /api/client/resend-otp` — nuovo OTP se scaduto
 - `C4 GET /api/client/license/status` — check periodico (frequenza configurabile in DB)
 - `C5 GET /api/client/messages` — poll messaggi in-app
@@ -90,7 +91,11 @@ Il server è **passivo**: risponde alle chiamate, non le inizia (unica eccezione
 
 **Nuove in v4:** `otp_attempts` (tentativi OTP falliti), `rate_limits` (rate limiting per IP/client), `idempotency_keys` (cache risposte F5)
 
-**Aggiornate in v4:** `vendors` (+`api_key_hash`, `api_key_revoked_at`, `api_key_history`), `alarm_logs` (+`retry_count`, `last_retry_at`, `next_retry_at`, `max_retries`)
+**Nuove in v4 — sezione 12 (decisione Alvise 09/06/2026):**
+- `vendor_general_setup` — 1 record per istanza; contiene `default_check_interval_hours` (default 24h)
+- `vendor_event_config` — 1 riga per tipo evento; campi: `event_code`, `enabled` (ON/OFF), `check_interval_hours` (NULL = usa default), `settings_json`, `last_run_at`
+
+**Aggiornate in v4:** `vendors` (+`api_key_hash`, `api_key_revoked_at`, `api_key_history`), `alarm_logs` (+`retry_count`, `last_retry_at`, `next_retry_at`, `max_retries`, `permanently_failed`)
 
 ## Punti chiave dell'analisi v3 (correzioni rispetto a v2)
 
@@ -110,7 +115,8 @@ Il server è **passivo**: risponde alle chiamate, non le inizia (unica eccezione
 3. **Sicurezza tecnica** — JWT RS256 (TTL 60s), refresh token (TTL 1h), license_key via HMAC-SHA256, OTP SHA256 in DB (max 3 tentativi, lockout 30min), API key vendor bcrypt rounds=12, rate limiting su C1/C3/F1
 4. **Design API completato** — HTTP status esatti per ogni endpoint (es. C1→201, C2→200, F5→201), response body completi, paginazione F3 (`?page&limit`, max 100)
 5. **Nuovi endpoint** — C7/C7b (cambio email con OTP), F9 (rotation API key vendor)
-6. **Scenari edge-case** — O1 retry ogni 15min (max 3, poi email fallback), C2 con O1 parziale (HTTP 500 ma JWT+license_key ritornati al client), provisional→standard via F5, idempotency recovery su timeout F5, offline >7 giorni
+6. **Scenari edge-case** — provisional→standard via F5, idempotency recovery su timeout F5, offline >7 giorni
+7. **[Decisione Alvise 09/06/2026] Architettura multi-tenant + sistema eventi** — istanza mono-vendor (VENDOR come chiave principale); `vendor_general_setup` (1 record di config); `vendor_event_config` (eventi schedulati ON/OFF indipendenti dalle API); C2 non chiama più O1 direttamente (imposta solo `vendor_synced=false`); O1 è esclusivo responsabilità dei job schedulati; 5 eventi predefiniti: `NEW_REGISTRATION`, `LICENSE_EXPIRING`, `LICENSE_EXPIRED`, `CLIENT_INACTIVE`, `ALARM_RETRY`
 
 ## Visualizzare i diagrammi
 
@@ -125,7 +131,7 @@ In alternativa i diagrammi si vedono direttamente su GitHub.
 | TO-DO | Descrizione | Stima | Settimana |
 |---|---|---|---|
 | TD-01 | Setup Node.js + Fastify + SQLite + Knex | 3gg | Sett.1 |
-| TD-02 | Schema DB + migrazioni (incl. tabelle v4) | 2gg | Sett.1 |
+| TD-02 | Schema DB + migrazioni (incl. tabelle v4 + `vendor_general_setup` + `vendor_event_config`) | 2gg | Sett.1 |
 | TD-03 | Auth fornitore JWT — F1, F2 | 2gg | Sett.2 |
 | TD-04 | Registrazione prodotti — F6 | 1gg | Sett.2 |
 | TD-05 | Registrazione cliente + OTP + VIES + AES — C1, C2, C3 | 4gg | Sett.2–3 |
@@ -133,7 +139,7 @@ In alternativa i diagrammi si vedono direttamente su GitHub.
 | TD-07 | Sincronizzazione fornitore — F3, F4, O1 | 2gg | Sett.3 |
 | TD-08 | Attivazione licenze a pagamento — F5 | 2gg | Sett.4 |
 | TD-09 | Licenza Provvisoria — F7, F8 | 3gg | Sett.4 |
-| TD-10 | Job schedulati node-cron | 3gg | Sett.5 |
+| TD-10 | Job schedulati node-cron — sistema eventi da `vendor_event_config` (sezione 12) | 3gg | Sett.5 |
 | TD-11 | Sistema messaggi + template Handlebars | 2gg | Sett.5 |
 | TD-12 | Test Jest + Swagger + bugfix | 3gg | Sett.6 |
 

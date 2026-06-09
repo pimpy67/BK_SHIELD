@@ -7,6 +7,7 @@
 > - Completato Design API (Sezione 9): HTTP status codes, response body esatti, paginazione
 > - Aggiunti 2 endpoint nuovi: C7 (cambio email), F9 (rotation API key)
 > - Aggiunti scenari edge-case (Sezione 11): timeout O1, fallimento parziale C2, trial→monthly/annual
+> - **[Decisione Alvise 09/06/2026]** Aggiunta Sezione 12: architettura multi-tenant (VENDOR come chiave principale), sistema eventi schedulati indipendenti dalle chiamate API, tabelle `vendor_general_setup` e `vendor_event_config`, eventi attivabili/disattivabili, C2 disaccoppiata da O1
 
 ---
 
@@ -17,6 +18,8 @@ Il presente documento **estende v3 preservando tutto il contenuto**. Le sezioni 
 - ✅ Formato request/response esplicito con esempi
 - ✅ Codici errore standardizzati
 - ✅ Indicazioni su idempotenza, timeout, rate limiting
+
+> **Documento di riferimento endpoint (da presentare):** per scopo, request body commentato, controlli e risposte JSON complete di ogni endpoint vedere **`Endpoint_Servizio_Gestione_Licenze_v5.md`**.
 
 ---
 
@@ -2390,6 +2393,219 @@ Quale comportamento adottare quando offline_token scade?
 
 ---
 
+# SEZIONE 12: ARCHITETTURA MULTI-TENANT E SISTEMA EVENTI
+
+> **Decisione Alvise — 09/06/2026.** Questa sezione introduce l'architettura definitiva del sistema schedulato e chiarisce dove il sistema legge il setup degli allarmi.
+
+---
+
+## 12.1 Istanza per VENDOR — Architettura mono-tenant per deployment
+
+Il servizio è progettato come **una istanza per vendor**: ogni deployment serve un unico fornitore. La tabella `vendors` contiene **1 solo record**, che funge da chiave principale dell'intera istanza. Tutti i dati (prodotti, clienti, licenze, eventi) sono implicitamente scoped a quel vendor.
+
+Questo risponde alla domanda di Alvise: *"da dove legge il sistema il setup degli allarmi?"* — lo legge dalla tabella `vendor_general_setup` (1 record, chiave vendor), che configura il comportamento dell'intera istanza.
+
+**Vantaggi:**
+- Isolamento completo tra deployment diversi (ogni cliente del produttore ha il suo server)
+- Setup semplice, nessuna logica di tenant routing
+- La chiave vendor è sempre costante e nota
+
+---
+
+## 12.2 Tabella `vendor_general_setup`
+
+Un unico record di configurazione globale per l'istanza, legato al vendor.
+
+```sql
+CREATE TABLE vendor_general_setup (
+  id            INTEGER   PRIMARY KEY DEFAULT 1,
+  vendor_id     INT       NOT NULL REFERENCES vendors(id),
+  default_check_interval_hours INT NOT NULL DEFAULT 24,
+  created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+**Vincolo applicativo:** esattamente 1 record. Inserimento bloccato se già esiste un record per `vendor_id`.
+
+| Campo | Tipo | Descrizione |
+|---|---|---|
+| `id` | INT | Sempre 1 — record unico |
+| `vendor_id` | INT FK | Riferimento al vendor dell'istanza |
+| `default_check_interval_hours` | INT | Frequenza default del check schedulato (default: 24h) |
+
+---
+
+## 12.3 Tabella `vendor_event_config` — Registro eventi
+
+Ogni tipo di evento schedulato ha **una riga** in questa tabella. Gli eventi sono completamente **indipendenti dalle chiamate API** (C1–C7b, F1–F9): vengono attivati esclusivamente dal job scheduler, mai da una chiamata HTTP in arrivo.
+
+```sql
+CREATE TABLE vendor_event_config (
+  id                    INTEGER   PRIMARY KEY AUTOINCREMENT,
+  vendor_id             INT       NOT NULL REFERENCES vendors(id),
+  event_code            VARCHAR(50) NOT NULL,
+  enabled               BOOLEAN   NOT NULL DEFAULT TRUE,
+  check_interval_hours  INT       NULL,     -- NULL = usa default da vendor_general_setup
+  settings_json         TEXT,               -- configurazione specifica (JSON)
+  last_run_at           TIMESTAMP NULL,
+  created_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(vendor_id, event_code)
+);
+```
+
+**`check_interval_hours = NULL`** — l'evento eredita `default_check_interval_hours` da `vendor_general_setup`.
+
+**`settings_json`** — parametri specifici dell'evento (soglie, contatori, ecc.), formato JSON.
+
+---
+
+## 12.4 Lista eventi predefiniti
+
+Popolata automaticamente al setup iniziale dell'istanza (seed migration). Ogni evento può essere abilitato o disabilitato tramite il campo `enabled`.
+
+| `event_code` | Descrizione | Condizione di attivazione | O1 | `settings_json` default |
+|---|---|---|---|---|
+| `NEW_REGISTRATION` | Registrazione non ancora sincronizzata con ERP | `licenses.vendor_synced = false` | ✅ | `{}` |
+| `LICENSE_EXPIRING` | Licenza in scadenza imminente | `expires_at` entro soglia (da settings) | ✅ | `{"warning_days_trial":[7,3,1],"warning_days_monthly":[7,3,1],"warning_days_annual":[90,60,42,30,21,14,10,7,3,1]}` |
+| `LICENSE_EXPIRED` | Licenza scaduta oggi | `expires_at < now() AND status != 'expired'` | ✅ | `{}` |
+| `CLIENT_INACTIVE` | Client senza C5 da N giorni | `last_c5_at < now() - threshold_days` | ❌ | `{"threshold_days":7}` |
+| `ALARM_RETRY` | Retry GET ALARM falliti in precedenza | `alarm_logs.success = false AND retry_count < max_retries` | ✅ | `{"max_retries":3}` |
+
+**Nota:** nuovi eventi possono essere aggiunti in futuro inserendo una riga — nessuna modifica allo schema necessaria.
+
+---
+
+## 12.5 Principio di separazione: API calls vs sistema eventi
+
+**Regola fondamentale:** le chiamate API non triggerano mai O1 direttamente. O1 è responsabilità esclusiva del sistema eventi.
+
+| Operazione | Pre-v5 (sezione 11) | Con sistema eventi (sezione 12) |
+|---|---|---|
+| C2 registra cliente | Triggera O1 `NEW_REGISTRATION` in real-time | Imposta `vendor_synced = false`; evento `NEW_REGISTRATION` lo processa al prossimo ciclo |
+| C4 rileva licenza scaduta | Poteva aggiornare status e notificare | Legge lo stato; evento `LICENSE_EXPIRED` gestisce O1 e aggiornamento status |
+| Scadenza imminente | Job controlla date e invia avvisi | Invariato — gestito da evento `LICENSE_EXPIRING` |
+| O1 fallisce | Retry ogni 15 min (job standalone, sezione 11.1) | Evento `ALARM_RETRY` abilitabile/disabilitabile |
+
+> ⚠️ **Le sezioni 11.1 e 11.2** descrivono il comportamento precedente a questa decisione. Il retry di O1 è ora gestito dall'evento `ALARM_RETRY`; C2 non ha più dipendenza diretta da O1.
+
+---
+
+## 12.6 Job separato per ogni evento
+
+All'avvio del server, node-cron legge `vendor_event_config` e registra **un job indipendente per ogni evento `enabled = true`**. L'intervallo è per-evento (o default da `vendor_general_setup`).
+
+```
+All'avvio del server:
+  leggi vendor_general_setup → default_check_interval_hours
+  
+  per ogni record in vendor_event_config WHERE enabled = true:
+    interval = check_interval_hours ?? default_check_interval_hours
+    schedula cron job con interval per event_code
+```
+
+---
+
+## 12.7 Sequenza check giornaliero (pseudocodice per ogni evento)
+
+### Evento `NEW_REGISTRATION`
+```
+Query:
+  SELECT l.*, c.email, v.erp_alarm_url
+  FROM licenses l
+  JOIN clients c ON l.client_id = c.id
+  JOIN vendors v ON c.vendor_id = v.id
+  WHERE l.vendor_synced = false
+
+Per ogni licenza trovata:
+  GET {erp_alarm_url}/alarm?alarm_code=NEW_REGISTRATION
+  Se 200 OK  → vendor_synced = true, INSERT alarm_logs (success=true)
+  Se errore  → INSERT alarm_logs (success=false, retry_count=0)
+               (verrà ripreso dall'evento ALARM_RETRY)
+```
+
+### Evento `LICENSE_EXPIRING`
+```
+settings = parse(event.settings_json)
+
+Per ogni tipo di licenza (trial, monthly, annual):
+  warning_days = settings.warning_days_{tipo}
+  
+  Per ogni soglia in warning_days:
+    Query licenze con expires_at = oggi + soglia AND expiring_notified_{soglia}d = false
+    Per ogni licenza:
+      GET {erp_alarm_url}/alarm?alarm_code=LICENSE_EXPIRING
+      Invia email SCADENZA_IMMINENTE → cliente
+      Invia in-app SCADENZA_IMMINENTE → cliente
+      Aggiorna expiring_notified_{soglia}d = true
+```
+
+### Evento `LICENSE_EXPIRED`
+```
+Query: SELECT * FROM licenses WHERE expires_at < now() AND status != 'expired'
+
+Per ogni licenza:
+  UPDATE licenses SET status = 'expired'
+  GET {erp_alarm_url}/alarm?alarm_code=LICENSE_EXPIRED
+  Invia email LICENZA_SCADUTA → cliente
+  Invia email LICENZA_SCADUTA → fornitore
+```
+
+### Evento `CLIENT_INACTIVE`
+```
+settings = parse(event.settings_json)  -- {threshold_days: 7}
+
+Query: SELECT * FROM clients
+       WHERE last_c5_at < now() - settings.threshold_days
+         AND inactivity_notified_at IS NULL
+
+Per ogni client:
+  Invia email CLIENT_INATTIVO → fornitore
+  UPDATE clients SET inactivity_notified_at = now()
+  -- Nessuna chiamata O1 per questo evento
+```
+
+### Evento `ALARM_RETRY`
+```
+settings = parse(event.settings_json)  -- {max_retries: 3}
+
+Query: SELECT * FROM alarm_logs
+       WHERE success = false AND retry_count < settings.max_retries
+
+Per ogni record:
+  Retry O1 (stesso alarm_code e payload originale)
+  Se 200 OK:
+    UPDATE alarm_logs SET success = true, last_retry_at = now()
+  Se errore:
+    UPDATE alarm_logs SET retry_count = retry_count + 1, last_retry_at = now()
+    Se retry_count == settings.max_retries:
+      Invia email GET_ALARM_FALLBACK → fornitore
+      UPDATE alarm_logs SET permanently_failed = true
+```
+
+---
+
+## 12.8 Impatto su endpoint C2 (verify-otp)
+
+Con il sistema eventi **C2 non chiama più O1 direttamente**. Il flusso C2 aggiornato è:
+
+```
+C2 (verify-otp) — flusso aggiornato:
+  1. ✅ Verifica OTP
+  2. ✅ Attiva cliente (clients.status → active)
+  3. ✅ Crea licenza (vendor_synced = false)
+  4. ✅ Genera JWT + refresh token + offline_token
+  5. ✅ HTTP 201 Created — restituisce JWT, license_key, offline_token
+
+  → Nessuna chiamata O1 da C2
+  → L'evento NEW_REGISTRATION processerà vendor_synced = false al prossimo ciclo
+```
+
+**Conseguenza pratica:** L'errore `GET_ALARM_FAILED` (sez. 6.3 — C2.6) **non viene più ritornato da C2**. C2 ritorna sempre `201 Created` se la licenza è stata creata con successo. Il disaccoppiamento elimina la possibilità che un problema ERP faccia fallire la registrazione di un cliente.
+
+---
+
 # APPENDICE: RIEPILOGO CAMBIAMENTI v4
 
 ## Nuovi Endpoint
@@ -2407,11 +2623,13 @@ Quale comportamento adottare quando offline_token scade?
 | `otp_attempts` | Traccia i tentativi di verifica OTP |
 | `rate_limits` | Traccia rate limiting per IP/client |
 | `idempotency_keys` | Cache delle risposte per idempotenza F5 |
+| `vendor_general_setup` | Configurazione globale dell'istanza (1 record, chiave vendor) |
+| `vendor_event_config` | Registro eventi schedulati, abilitabili/disabilitabili per tipo |
 
 ## Tabelle Aggiornate
 
 - `vendors` — aggiunto `api_key_hash`, `api_key_revoked_at`, `api_key_history`
-- `alarm_logs` — aggiunto `retry_count`, `last_retry_at`, `next_retry_at`, `max_retries`
+- `alarm_logs` — aggiunto `retry_count`, `last_retry_at`, `next_retry_at`, `max_retries`, `permanently_failed`
 
 ## Concetti Nuovi
 
@@ -2420,7 +2638,9 @@ Quale comportamento adottare quando offline_token scade?
 - ✅ Sicurezza tecnica (JWT RS256, license_key HMAC, OTP hashing, bcrypt API key, rate limiting)
 - ✅ Design API completato (HTTP status, response body precisi, paginazione)
 - ✅ Scenari edge-case (O1 retry, C2 parziale, trial→monthly/annual, idempotency recovery, offline >7gg)
+- ✅ **[Decisione Alvise 09/06/2026]** Architettura multi-tenant mono-vendor, sistema eventi schedulati (`vendor_event_config`) indipendenti dalle chiamate API, ogni evento ha job separato e può essere abilitato/disabilitato, C2 disaccoppiata da O1
 
 ---
 
 *Documento v4 redatto il 08/06/2026 — estensione di v3 con error handling, idempotenza e sicurezza*
+*Aggiornato il 09/06/2026 — Sezione 12: architettura multi-tenant, sistema eventi schedulati (decisione Alvise)*
