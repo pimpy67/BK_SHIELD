@@ -14,8 +14,16 @@ Backend per la gestione del ciclo di vita delle licenze software, denominato **S
 
 ## Decisioni tecnologiche prese
 
-- **Backend:** Python o Node.js (C# escluso — decisione di Alvise)
+- **Backend:** Node.js + Fastify (raccomandato) o Express — C# escluso per decisione di Alvise
+- **ORM/Query builder:** Knex.js con better-sqlite3
+- **Database:** SQLite
 - **Frontend:** Ionic — sviluppo posticipato
+- **Auth:** JWT RS256 + refresh token rotation; API key vendor con bcrypt rounds=12
+- **Crittografia offline:** AES-256-GCM via `crypto` nativo Node.js
+- **Email:** Nodemailer — provider da scegliere (SendGrid / Mailgun / Brevo)
+- **Test:** Jest + Supertest
+- **Job schedulati:** node-cron
+- **Documentazione API:** Swagger UI (swagger-jsdoc)
 - **Repository GitHub:** https://github.com/pimpy67/BK_SHIELD
 - **Git identity:** user.name = pimpy67, user.email = andreapavan67@gmail.com
 
@@ -31,6 +39,8 @@ Backend per la gestione del ciclo di vita delle licenze software, denominato **S
 | `ERROR_REFERENCE_MATRIX.md` | Matrice di riferimento di tutti i codici errore |
 | `Flowchart_Servizio_Gestione_Licenze.md` | 9 diagrammi Mermaid del flusso completo (richiesti da Luca) |
 | `Riepilogo servizio fatturazione.md` | Verbale della riunione del 04/06/2026 con le direttive di Alvise |
+| `Piano_di_Progetto_Servizio_Gestione_Licenze (to_do).docx` | Piano di progetto con 12 TO-DO, stime e analisi rischi |
+| `sviluppo_v0.md` | Guida di avvio sviluppo backend — decisioni pre-OK, struttura progetto, Gantt |
 
 ## Architettura del sistema
 
@@ -109,10 +119,36 @@ Aprire `Flowchart_Servizio_Gestione_Licenze.md` in VS Code con `Ctrl+Shift+V`.
 Estensione richiesta: **Markdown Preview Mermaid Support** (già installata).
 In alternativa i diagrammi si vedono direttamente su GitHub.
 
+## Piano di sviluppo (TO-DO)
+
+12 TO-DO in ordine logico di implementazione. Dettaglio completo in `sviluppo_v0.md` e nel Piano di Progetto docx.
+
+| TO-DO | Descrizione | Stima | Settimana |
+|---|---|---|---|
+| TD-01 | Setup Node.js + Fastify + SQLite + Knex | 3gg | Sett.1 |
+| TD-02 | Schema DB + migrazioni (incl. tabelle v4) | 2gg | Sett.1 |
+| TD-03 | Auth fornitore JWT — F1, F2 | 2gg | Sett.2 |
+| TD-04 | Registrazione prodotti — F6 | 1gg | Sett.2 |
+| TD-05 | Registrazione cliente + OTP + VIES + AES — C1, C2, C3 | 4gg | Sett.2–3 |
+| TD-06 | Verifica licenza + poll messaggi — C4, C5, C6 | 2gg | Sett.3 |
+| TD-07 | Sincronizzazione fornitore — F3, F4, O1 | 2gg | Sett.3 |
+| TD-08 | Attivazione licenze a pagamento — F5 | 2gg | Sett.4 |
+| TD-09 | Licenza Provvisoria — F7, F8 | 3gg | Sett.4 |
+| TD-10 | Job schedulati node-cron | 3gg | Sett.5 |
+| TD-11 | Sistema messaggi + template Handlebars | 2gg | Sett.5 |
+| TD-12 | Test Jest + Swagger + bugfix | 3gg | Sett.6 |
+
+**Totale:** 27gg (~5,5 settimane) + 7gg buffer = **7 settimane**
+
+**TO-DO critico:** TD-05 — ha il maggior numero di GAP tecnici (VIES, AES-256-GCM, Nodemailer). Fare uno spike su VIES prima di iniziarlo.
+
 ## Domande aperte (da risolvere col team)
 
-- Quale provider email usare (SendGrid, Mailgun, ecc.)?
+- Fastify o Express? (raccomandato Fastify)
+- Quale provider email usare (SendGrid, Mailgun, Brevo)?
+- VIES obbligatorio o facoltativo nella v1?
 - Comportamento alla scadenza dell'`offline_token`: blocco immediato, modalità di grazia 3 giorni, o downgrade funzioni? (v4 sezione 11.5 documenta i 3 scenari)
 - Servizio esterno per validazione P.IVA: quale e a che costo? (VIES per EU)
 - Pannello di amministrazione per il Service Invoice: sì o no?
 - IBAN del cliente in `client_billing`: necessario solo se il fornitore usa addebito diretto SEPA, altrimenti il pagamento vive nell'ERP del fornitore.
+- Divisione TO-DO tra Andrea e Cristina.
