@@ -31,16 +31,15 @@ Backend per la gestione del ciclo di vita delle licenze software, denominato **S
 
 | File | Descrizione |
 |---|---|
-| `Analisi_Servizio_Gestione_Licenze_v2.docx` / `.odt` | Analisi originale del team (con lacune rispetto alle direttive di Alvise) |
-| `Analisi_Servizio_Gestione_Licenze_v2_AGGIORNATA.md` / `.docx` | Versione v2 con correzioni intermedie |
-| `Analisi_Servizio_Gestione_Licenze_v3.md` | Analisi con correzioni di Alvise (sezioni 1–5) |
-| `Analisi_Servizio_Gestione_Licenze_v4_correzioni.md` | **Versione corrente** — estende v3 con error handling, idempotenza, sicurezza, edge case |
-| `v3_to_v4_CHANGELOG.md` | Changelog dettagliato delle novità v3→v4 |
+| `Analisi_Servizio_Gestione_Licenze_v4_correzioni.md` | **Analisi tecnica master** — endpoint, errori, sicurezza, idempotenza, edge case |
+| `Analisi_Servizio_Gestione_Licenze_v4_correzioni.docx` | Versione Word dell'analisi v4 |
 | `ERROR_REFERENCE_MATRIX.md` | Matrice di riferimento di tutti i codici errore |
 | `Flowchart_Servizio_Gestione_Licenze.md` | 9 diagrammi Mermaid del flusso completo (richiesti da Luca) |
 | `Riepilogo servizio fatturazione.md` | Verbale della riunione del 04/06/2026 con le direttive di Alvise |
 | `Piano_di_Progetto_Servizio_Gestione_Licenze (to_do).docx` | Piano di progetto con 12 TO-DO, stime e analisi rischi |
 | `sviluppo_v0.md` | Guida di avvio sviluppo backend — decisioni pre-OK, struttura progetto, Gantt |
+| `Descrizione_Servizio_Gestione_Licenze.pdf` | Descrizione sintetica del servizio |
+| `archivio/` | Versioni precedenti (v2, v3, changelog, script) — solo riferimento storico |
 
 ## Architettura del sistema
 

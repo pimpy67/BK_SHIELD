@@ -1,0 +1,473 @@
+[  0] P  Heading1             | Analisi – Servizio Gestione Licenze (v2 Aggiornata)
+[  1] P  Normal               | > **Changelog v2 → v2 Aggiornata:**
+[  2] P  Normal               | > - Mantenuti tutti i contenuti originali di v2
+[  3] P  Normal               | > - Aggiunte 6 nuove sezioni: Error Handling, Idempotenza, Sicurezza, Design API, Nuovi En
+[  4] P  Normal               | > - Aggiunti dettagli mancanti: algoritmi JWT, generazione license_key, rate limiting, OTP
+[  5] P  Normal               | > - Aggiornate tabelle: vendors, alarm_logs con nuovi campi
+[  6] P  Normal               | > - Aggiunte 3 nuove tabelle: otp_attempts, rate_limits, idempotency_keys
+[  7] P  Normal               | > - Documento pronto per implementazione e presentazione
+[  8] P  Normal               | ---
+[  9] P  Heading2             | 1. Panoramica generale
+[ 10] P  Normal               | Il Servizio Gestione Licenze è un sistema back-end che si posiziona come intermediario tra
+[ 11] P  Normal               | Il suo scopo principale è gestire il ciclo di vita delle licenze software: dalla prima reg
+[ 12] P  Heading3             | Architettura a tre livelli
+[ 13] P  Normal               | Le frecce blu da sinistra verso il centro rappresentano le chiamate della libreria client 
+[ 14] P  Heading3             | Punti chiave
+[ 15] P  ListBullet           | Il servizio è **passivo**: risponde alle chiamate, non le inizia (ad eccezione di O1 e dei
+[ 16] P  ListBullet           | Ogni cliente è identificato da una `license_key` univoca generata al momento dell'attivazi
+[ 17] P  ListBullet           | L'autenticazione è **separata** per cliente (JWT + refresh token) e fornitore (JWT + refre
+[ 18] P  ListBullet           | Il sistema è **multilingua** (italiano e inglese) e predisposto per futura gestione multi-
+[ 19] P  ListBullet           | Tutti i messaggi email e in-app sono generati e gestiti internamente dal servizio
+[ 20] P  Heading2             | 2. Descrizione dettagliata del funzionamento
+[ 21] P  Normal               | Di seguito viene descritto il funzionamento completo del servizio, seguendo l'ordine natur
+[ 22] P  Heading3             | 2.1 Configurazione iniziale del fornitore
+[ 23] P  Normal               | Prima che qualsiasi cliente possa registrarsi, il fornitore deve autenticarsi sul servizio
+[ 24] P  Heading4             | F1 – Autenticazione fornitore
+[ 25] P  Normal               | `POST /api/vendor/auth/login`
+[ 26] P  Normal               | Il sistema ERP del fornitore si autentica inviando la propria API key statica. Il servizio
+[ 27] P  Normal               | **Tabella: `vendors`**
+[ 28] T   8 rows          | Campo | Tipo | Descrizione
+[ 29] P  Normal               | **Tabella: `vendor_tokens`**
+[ 30] T   7 rows          | Campo | Tipo | Descrizione
+[ 31] P  Heading4             | F2 – Rinnovo token fornitore
+[ 32] P  Normal               | `POST /api/vendor/token/refresh`
+[ 33] P  Normal               | Quando il JWT scade, il fornitore usa il refresh token per ottenerne uno nuovo senza dover
+[ 34] P  Heading4             | F6 – Registrazione nuovo prodotto
+[ 35] P  Normal               | `POST /api/vendor/products`
+[ 36] P  Normal               | Il fornitore registra un nuovo prodotto comunicando la sua chiave univoca (product_key) e 
+[ 37] P  Normal               | **Tabella: `products`**
+[ 38] T   5 rows          | Campo | Tipo | Descrizione
+[ 39] P  Normal               | ---
+[ 40] P  Heading3             | 2.2 Registrazione del cliente
+[ 41] P  Normal               | Quando un cliente installa per la prima volta un'applicazione del fornitore, la libreria c
+[ 42] P  Heading4             | C1 – Registrazione cliente
+[ 43] P  Normal               | `POST /api/client/register`
+[ 44] P  Normal               | La libreria client invia i dati anagrafici del cliente: product_key (già inclusa nella lib
+[ 45] P  Normal               | Il servizio verifica che la product_key esista nella tabella products. Verifica poi che la
+[ 46] P  Normal               | Se i dati sono validi, il cliente viene salvato nella tabella clients con stato pending, v
+[ 47] P  Normal               | **Tabella: `clients`**
+[ 48] T  11 rows          | Campo | Tipo | Descrizione
+[ 49] P  Normal               | **Tabella: `otp_codes`**
+[ 50] T   7 rows          | Campo | Tipo | Descrizione
+[ 51] P  Normal               | 
+[ 52] P  Normal               | **Tabella: `otp_attempts` (NUOVO)**
+[ 53] T   6 rows          | Campo | Tipo | Descrizione
+[ 54] P  Normal               | 
+[ 55] P  Normal               | In questa fase viene inviata la seguente email al cliente:
+[ 56] P  Normal               | Oggetto: Verifica il tuo indirizzo email – {product_name}Gentile {company_name},abbiamo ri
+[ 57] P  Normal               | 
+[ 58] P  Normal               | 
+[ 59] P  Normal               | 
+[ 60] P  Heading4             | C2 – Verifica OTP
+[ 61] P  Normal               | `POST /api/client/verify-otp`
+[ 62] P  Normal               | Il cliente inserisce il codice OTP nell'applicazione e la libreria lo invia al servizio. S
+[ 63] P  ListBullet           | Attiva il cliente (status → active)
+[ 64] P  ListBullet           | Genera la license_key univoca: `HMAC_SHA256(random_uuid + timestamp + vat_number + country
+[ 65] P  ListBullet           | Crea la licenza trial nella tabella licenses
+[ 66] P  ListBullet           | Emette JWT + refresh token per il client
+[ 67] P  ListBullet           | Triggera il GET ALARM verso l'ERP del fornitore
+[ 68] P  Normal               | **Tabella: `licenses`**
+[ 69] T  14 rows          | Campo | Tipo | Descrizione
+[ 70] P  Normal               | 
+[ 71] P  Normal               | 
+[ 72] P  Normal               | **Tabella: `client_tokens`**
+[ 73] T   7 rows          | Campo | Tipo | Descrizione
+[ 74] P  Normal               | 
+[ 75] P  Normal               | In questa fase vengono inviati i seguenti messaggi:
+[ 76] P  Normal               | Email di benvenuto → Cliente
+[ 77] P  Normal               | Oggetto: Benvenuto in {product_name} – Attivazione Trial Demo
+[ 78] P  Normal               | 
+[ 79] P  Normal               | Gentile {company_name},
+[ 80] P  Normal               | 
+[ 81] P  Normal               | siamo lieti di comunicarle che la Trial Demo di {product_name} è stata attivata con succes
+[ 82] P  Normal               | La Trial Demo sarà disponibile fino al {expires_at}.
+[ 83] P  Normal               | Al termine del periodo di prova potrà procedere con l'acquisto di una licenza.
+[ 84] P  Normal               | 
+[ 85] P  Normal               | Cordiali saluti, Il team di {product_name}
+[ 86] P  Normal               | 
+[ 87] P  Normal               | Messaggio in-app → Cliente
+[ 88] P  Normal               | Titolo: Benvenuto in {product_name}
+[ 89] P  Normal               | Testo: La Trial Demo è stata attivata con successo. Ha a disposizione il periodo di prova 
+[ 90] P  Normal               | Per maggiori informazioni contattare {contact_email} oppure {contact_phone}.
+[ 91] P  Normal               | 
+[ 92] P  Normal               | Email nuova registrazione → Fornitore
+[ 93] P  Normal               | Oggetto: Nuova registrazione cliente – {company_name}
+[ 94] P  Normal               | 
+[ 95] P  Normal               | Gentile team, si comunica che un nuovo cliente si è registrato al servizio.
+[ 96] P  Normal               | Azienda: {company_name} | Prodotto: {product_name} | Scadenza Trial: {expires_at}
+[ 97] P  Normal               | 
+[ 98] P  Normal               | Cordiali saluti, Il sistema di gestione licenze
+[ 99] P  Normal               | 
+[100] P  Normal               | C3 – Nuovo OTP (caso: OTP scaduto o non ricevuto)
+[101] P  Normal               | `POST /api/client/resend-otp`
+[102] P  Normal               | Se il cliente non riceve l'OTP o se scade prima che venga inserito, la libreria client può
+[103] P  Normal               | **Rate Limiting:** Max 3 resend per client per ora. Superato il limite, risposta HTTP 429.
+[104] P  Normal               | In questa fase viene inviata la seguente email al cliente:
+[105] P  Normal               | Email OTP → Cliente
+[106] P  Normal               | Oggetto: Verifica il tuo indirizzo email – {product_name}
+[107] P  Normal               | 
+[108] P  Normal               | Gentile {company_name},
+[109] P  Normal               | 
+[110] P  Normal               | abbiamo ricevuto la sua richiesta di registrazione a {product_name}.
+[111] P  Normal               | Per completare la registrazione e attivare la Trial Demo, la invitiamo a inserire
+[112] P  Normal               | il seguente codice di verifica nell'applicazione:
+[113] P  Normal               | 
+[114] P  Normal               |     Codice OTP: {otp_code}
+[115] P  Normal               | 
+[116] P  Normal               | Il codice è valido per {otp_expiry_minutes} minuti.
+[117] P  Normal               | 
+[118] P  Normal               | Cordiali saluti, Il team di {product_name}
+[119] P  Normal               | 
+[120] P  Heading3             | 2.3 Funzionamento ordinario della licenza
+[121] P  Normal               | Una volta registrato, il cliente dispone di una license_key e di un JWT valido. La libreri
+[122] P  Heading4             | C4 – Verifica stato licenza
+[123] P  Normal               | `GET /api/client/license/status`
+[124] P  Normal               | La libreria client chiama questo endpoint periodicamente per verificare lo stato della lic
+[125] P  Normal               | Il servizio restituisce lo stato corrente (active, expired, suspended), il tipo di licenza
+[126] P  Normal               | **Tabella: `modules`**
+[127] T   5 rows          | Campo | Tipo | Descrizione
+[128] P  Normal               | 
+[129] P  Normal               | **Tabella: `license_modules`**
+[130] T   4 rows          | Campo | Tipo | Descrizione
+[131] P  Heading4             | 
+[132] P  Heading4             | C5 – Poll messaggi in-app
+[133] P  Normal               | `GET /api/client/messages`
+[134] P  Normal               | La libreria client fa polling periodico per ricevere eventuali messaggi in-app in coda (ba
+[135] P  Normal               | Questo endpoint è anche il meccanismo con cui il servizio monitora la salute del client: s
+[136] P  Normal               | **Tabella: `messages`**
+[137] T  12 rows          | Campo | Tipo | Descrizione
+[138] P  Normal               | 
+[139] P  Normal               | **Tabella: `client_activity_logs`**
+[140] T   5 rows          | Campo | Tipo | Descrizione
+[141] P  Heading4             | 
+[142] P  Heading4             | 
+[143] P  Heading4             | C6 – Rinnovo token cliente
+[144] P  Normal               | `POST /api/client/token/refresh`
+[145] P  Normal               | Il JWT del client ha una durata molto breve (60 secondi). Quando scade, la libreria usa il
+[146] P  Normal               | ---
+[147] P  Heading3             | 2.4 Sincronizzazione con il fornitore
+[148] P  Normal               | Ogni volta che un cliente completa la registrazione (C2 andata a buon fine), il servizio i
+[149] P  Heading4             | O1 – GET ALARM verso ERP fornitore
+[150] P  Normal               | `GET {vendor_erp_url}/alarm`
+[151] P  Normal               | Il servizio invia una chiamata GET all'URL dell'ERP del fornitore con un alarm_code che id
+[152] P  Normal               | Se O1 fallisce, il server ritenta ogni 15 minuti per max 3 tentativi (24 ore), poi invia e
+[153] P  Normal               | **Tabella: `alarm_logs`**
+[154] T  11 rows          | Campo | Tipo | Descrizione
+[155] P  Heading4             | F3 – Recupero nuove iscrizioni
+[156] P  Normal               | `GET /api/vendor/registrations/new`
+[157] P  Normal               | Ricevuto il GET ALARM, il fornitore chiama questo endpoint per scaricare la lista delle nu
+[158] P  Normal               | **Paginazione:** `?page=1&limit=50` (max 100)
+[159] P  Heading4             | F4 – Conferma ricezione nuove iscrizioni
+[160] P  Normal               | `POST /api/vendor/registrations/confirm`
+[161] P  Normal               | Il fornitore conferma di aver ricevuto e processato le iscrizioni inviando la lista degli 
+[162] P  Normal               | **Idempotenza:** Idempotente — Retrying con stessi ID produce lo stesso risultato.
+[163] P  Normal               | ---
+[164] P  Heading3             | 2.5 Attivazione licenza a pagamento
+[165] P  Normal               | Quando un cliente decide di acquistare una licenza mensile o annuale (tipicamente al termi
+[166] P  Heading4             | F5 – Attivazione licenza a pagamento
+[167] P  Normal               | `POST /api/vendor/license/activate`
+[168] P  Normal               | **Header OBBLIGATORIO:** `Idempotency-Key: <unique_key>`
+[169] P  Normal               | Il fornitore invia i dettagli della nuova licenza: vat_number e product_key del cliente, t
+[170] P  Normal               | **Idempotenza:** La stessa `Idempotency-Key` + stesso body = stessa risposta senza duplica
+[171] P  Normal               | **Tabella: `idempotency_keys` (NUOVO)**
+[172] T  10 rows          | Campo | Tipo | Descrizione
+[173] P  Normal               | 
+[174] P  Normal               | In questa fase vengono inviati i seguenti messaggi al cliente:
+[175] P  Normal               | Email attivazione licenza → Cliente
+[176] P  Normal               | Oggetto: Licenza {product_name} attivata – Accesso confermatoGentile {company_name},siamo 
+[177] P  Normal               | --- Messaggio in-app → Cliente
+[178] P  Normal               | Titolo: Licenza attivata
+[179] P  Normal               | Testo: La licenza di {product_name} è stata attivata con successo ed è valida fino al {exp
+[180] P  Normal               | Per maggiori informazioni contattare {contact_email} oppure {contact_phone}.
+[181] P  Normal               | 
+[182] P  Heading3             | 2.6 Avvisi di scadenza e disattivazione automatica
+[183] P  Normal               | Il servizio gestisce in modo proattivo la scadenza delle licenze attraverso job schedulati
+[184] P  ListBullet           | **Trial Demo:** avvisi 7, 3 e 1 giorno prima della scadenza
+[185] P  ListBullet           | **Licenza mensile:** avvisi 7, 3 e 1 giorno prima della scadenza
+[186] P  ListBullet           | **Licenza annuale:** avvisi a 3 mesi, 2 mesi, 6 settimane, 1 mese, 3 settimane, 2 settiman
+[187] P  Normal               | Per ogni scadenza imminente il servizio triggera inoltre un GET ALARM verso l'ERP del forn
+[188] P  Normal               | Il giorno stesso della scadenza, se la licenza non è stata rinnovata, il servizio disattiv
+[189] P  Normal               | ---
+[190] P  Normal               | In questa fase vengono inviati i seguenti messaggi (il testo è lo stesso per tutte le temp
+[191] P  Normal               | Email scadenza imminente → Cliente (esempio: licenza annuale)
+[192] P  Normal               | Oggetto: La tua licenza annuale di {product_name} scade tra {days_remaining} giorni
+[193] P  Normal               | 
+[194] P  Normal               | Gentile {company_name},
+[195] P  Normal               | 
+[196] P  Normal               | le ricordiamo che la sua licenza annuale di {product_name} scadrà tra {days_remaining} gio
+[197] P  Normal               | Per garantire la continuità del servizio, la invitiamo a procedere con il rinnovo.
+[198] P  Normal               | 
+[199] P  Normal               | Email: {contact_email} | Telefono: {contact_phone}
+[200] P  Normal               | 
+[201] P  Normal               | Cordiali saluti, Il team di {product_name}
+[202] P  Normal               | 
+[203] P  Normal               | Messaggio in-app → Cliente (esempio: licenza annuale)
+[204] P  Normal               | Titolo: Licenza annuale in scadenza
+[205] P  Normal               | Testo: La licenza annuale di {product_name} scadrà tra {days_remaining} giorni, il {expire
+[206] P  Normal               | Per maggiori informazioni contattare {contact_email} oppure {contact_phone}.
+[207] P  Normal               | 
+[208] P  Normal               | Il giorno stesso della scadenza, se la licenza non è stata rinnovata, il servizio disattiv
+[209] P  Normal               | 
+[210] P  Normal               | Il giorno della scadenza vengono inviati i seguenti messaggi:
+[211] P  Normal               | Email licenza scaduta → Cliente
+[212] P  Normal               | Oggetto: Licenza {product_name} scaduta – Accesso sospeso
+[213] P  Normal               | 
+[214] P  Normal               | Gentile {company_name},
+[215] P  Normal               | 
+[216] P  Normal               | le comunichiamo che la sua licenza di {product_name} è scaduta in data {expires_at} e l'ac
+[217] P  Normal               | Per ripristinare l'accesso contattarci a: {contact_email} | {contact_phone}
+[218] P  Normal               | 
+[219] P  Normal               | Cordiali saluti, Il team di {product_name}
+[220] P  Normal               | 
+[221] P  Normal               | Messaggio in-app → Cliente
+[222] P  Normal               | Titolo: Licenza scaduta
+[223] P  Normal               | Testo: La licenza di {product_name} è scaduta il {expires_at}. L'accesso al servizio è sta
+[224] P  Normal               | Per maggiori informazioni contattare {contact_email} oppure {contact_phone}.
+[225] P  Normal               | 
+[226] P  Normal               | Email licenza scaduta → Fornitore
+[227] P  Normal               | Oggetto: Licenza scaduta – {company_name} – {product_name}
+[228] P  Normal               | 
+[229] P  Normal               | Gentile team, la licenza del seguente cliente è scaduta e l'accesso è stato sospeso.
+[230] P  Normal               | Azienda: {company_name} | Prodotto: {product_name} | Data scadenza: {expires_at}
+[231] P  Normal               | 
+[232] P  Normal               | Cordiali saluti, Il sistema di gestione licenze
+[233] P  Normal               | 
+[234] P  Heading3             | 2.7 Caso eccezionale: tentativo di ri-registrazione bloccato
+[235] P  Normal               | La license_key viene emessa una sola volta per ogni coppia cliente+prodotto. Se un client 
+[236] P  Normal               | Messaggio in-app restituito al cliente:
+[237] P  Normal               | Titolo: Registrazione non consentitaTesto: Non è possibile completare la registrazione. La
+[238] P  Normal               | ---
+[239] P  Normal               | In questa fase viene generato il seguente messaggio in-app (nessuna email):
+[240] P  Normal               | Messaggio in-app → Cliente
+[241] P  Normal               | Titolo: Registrazione non consentita
+[242] P  Normal               | Testo: Non è possibile completare la registrazione. La Trial Demo per questo prodotto è gi
+[243] P  Normal               | Contattare {contact_email} oppure {contact_phone}.
+[244] P  Normal               | 
+[245] P  Normal               | Questo messaggio viene inserito nella tabella messages con channel = in_app e delivered_at
+[246] P  Normal               | 
+[247] P  Normal               | 
+[248] P  Heading3             | 2.8 Monitoraggio attività client e notifica inattività
+[249] P  Normal               | Ad ogni chiamata C5 (poll messaggi in-app), il servizio aggiorna il campo last_seen_at nel
+[250] P  Normal               | In tal caso, il servizio aggiorna inactivity_notified_at per evitare invii duplicati e not
+[251] P  Normal               | ---
+[252] P  Normal               | In questa fase viene inviata la seguente email al fornitore (nessun messaggio in-app):
+[253] P  Normal               | Email client inattivo → Fornitore
+[254] P  Normal               | Oggetto: Attenzione: client inattivo da 7 giorni – {company_name} – {product_name}
+[255] P  Normal               | 
+[256] P  Normal               | Gentile team,
+[257] P  Normal               | 
+[258] P  Normal               | si comunica che il seguente cliente non risulta attivo sul servizio da almeno 7 giorni.
+[259] P  Normal               | Il sistema non ha ricevuto chiamate dalla libreria client installata presso di loro.
+[260] P  Normal               | 
+[261] P  Normal               | Azienda: {company_name} | Prodotto: {product_name}
+[262] P  Normal               | Licenza: {license_type} | Scadenza: {expires_at}
+[263] P  Normal               | Ultima attività rilevata: {last_seen_at}
+[264] P  Normal               | 
+[265] P  Normal               | Si consiglia di verificare con il cliente se il servizio è ancora in uso.
+[266] P  Normal               | 
+[267] P  Normal               | Cordiali saluti, Il sistema di gestione licenze
+[268] P  Normal               | 
+[269] P  Heading3             | 2.9 Riapertura dell'applicazione da parte di un cliente già registrato
+[270] P  Normal               | Quando un cliente già registrato riapre l'applicazione, la libreria client chiama nuovamen
+[271] P  Normal               | La libreria client utilizza poi la license_key e il meccanismo di token refresh (C6) per r
+[272] P  Normal               | ---
+[273] P  Heading2             | 3. SEZIONE NUOVA – ERROR HANDLING & CODICI ERRORE
+[274] P  Heading3             | 3.1 Formato standardizzato risposta errore
+[275] P  Normal               | Tutte le risposte di errore seguono questo formato JSON:
+[276] P  Normal               | {  "error_code": "DESCRITTIVO_SNAKE_CASE",  "message": "Descrizione leggibile per il clien
+[277] P  Heading3             | 3.2 HTTP Status Code per Successo
+[278] T  13 rows          | Endpoint | Metodo | Success Status | Motivo
+[279] P  Heading3             | 3.3 Errori per endpoint
+[280] P  Normal               | **C1 (register):** 11 possibili errori
+[281] P  ListBullet           | PRODUCT_KEY_NOT_FOUND (404)
+[282] P  ListBullet           | INVALID_VAT_FORMAT (400)
+[283] P  ListBullet           | INVALID_EMAIL_FORMAT (400)
+[284] P  ListBullet           | INVALID_LANGUAGE (400)
+[285] P  ListBullet           | INVALID_COUNTRY_CODE (400)
+[286] P  ListBullet           | MISSING_REQUIRED_FIELD (400)
+[287] P  ListBullet           | CLIENT_ALREADY_REGISTERED (409)
+[288] P  ListBullet           | RATE_LIMIT_EXCEEDED (429) — max 5 per IP/ora
+[289] P  ListBullet           | EMAIL_SEND_FAILED (500)
+[290] P  ListBullet           | INTERNAL_SERVER_ERROR (500)
+[291] P  Normal               | **C2 (verify-otp):** 8 possibili errori
+[292] P  ListBullet           | INVALID_OTP_CODE (400)
+[293] P  ListBullet           | OTP_CODE_EXPIRED (400)
+[294] P  ListBullet           | OTP_MAX_ATTEMPTS_EXCEEDED (429) — max 3 tentativi, blocco 30 min
+[295] P  ListBullet           | CLIENT_NOT_FOUND (404)
+[296] P  ListBullet           | DATABASE_TRANSACTION_FAILED (500)
+[297] P  ListBullet           | GET_ALARM_FAILED (500) — Licenza creata, ma notifica ERP fallita
+[298] P  Normal               | **C3 (resend-otp):** 4 possibili errori
+[299] P  ListBullet           | CLIENT_NOT_FOUND (404)
+[300] P  ListBullet           | RATE_LIMIT_EXCEEDED (429) — max 3 resend/ora
+[301] P  ListBullet           | EMAIL_SEND_FAILED (500)
+[302] P  Normal               | **C4 (license/status):** 5 possibili errori
+[303] P  ListBullet           | INVALID_JWT (401)
+[304] P  ListBullet           | INVALID_LICENSE_KEY (401)
+[305] P  ListBullet           | LICENSE_NOT_FOUND (404)
+[306] P  ListBullet           | JWT_LICENSE_KEY_MISMATCH (403)
+[307] P  Normal               | **C5 (messages):** 4 possibili errori
+[308] P  ListBullet           | INVALID_JWT (401)
+[309] P  ListBullet           | INVALID_LICENSE_KEY (401)
+[310] P  ListBullet           | LICENSE_NOT_FOUND (404)
+[311] P  Normal               | **C6 (token/refresh):** 3 possibili errori
+[312] P  ListBullet           | INVALID_REFRESH_TOKEN (401)
+[313] P  ListBullet           | CLIENT_NOT_FOUND (404)
+[314] P  Normal               | **F1 (auth/login):** 3 possibili errori
+[315] P  ListBullet           | INVALID_API_KEY (401)
+[316] P  ListBullet           | VENDOR_DISABLED (403)
+[317] P  Normal               | **F5 (license/activate):** 8 possibili errori
+[318] P  ListBullet           | INVALID_JWT (401)
+[319] P  ListBullet           | IDEMPOTENCY_KEY_REQUIRED (400)
+[320] P  ListBullet           | CLIENT_NOT_FOUND (404)
+[321] P  ListBullet           | INVALID_DATE_RANGE (400)
+[322] P  ListBullet           | INVALID_MAX_USERS (400)
+[323] P  ListBullet           | INVALID_MODULE_ID (400)
+[324] P  Normal               | *Per dettagli completi (example request/response) di ogni errore, vedi documento ERROR_REF
+[325] P  Normal               | ---
+[326] P  Heading2             | 4. SEZIONE NUOVA – IDEMPOTENZA
+[327] P  Heading3             | 4.1 Strategia C2 (verify-otp) – Check-before-create
+[328] P  Normal               | Se C2 viene chiamato due volte con lo stesso OTP, il secondo tentativo ritorna HTTP 200 co
+[329] P  Normal               | SELECT * FROM licenses WHERE client_id = ? AND product_id = ? AND status = 'active'
+[330] P  Normal               | Se licenza esiste, ritorna i dati. Se non esiste, crea e ritorna nuovi dati.
+[331] P  Heading3             | 4.2 Strategia F4 (confirm) – Idempotent Update
+[332] P  Normal               | UPDATE contratti SET vendor_synced = true WHERE id IN (1,2,3) AND vendor_synced = false
+[333] P  Normal               | Se già marcate come true, nessun cambiamento. Risposta identica.
+[334] P  Heading3             | 4.3 Strategia F5 (activate) – Idempotency-Key Header
+[335] P  Normal               | **Header OBBLIGATORIO:** `Idempotency-Key: activate_order_12345_20260608`
+[336] P  Normal               | Se vendor ritenta con stessa key, server ritorna la risposta salvata dalla prima chiamata 
+[337] P  Normal               | Implementazione: Query in `idempotency_keys` per chiave + vendor_id. Se trovato, ritorna r
+[338] P  Normal               | ---
+[339] P  Heading2             | 5. SEZIONE NUOVA – SICUREZZA TECNICA
+[340] P  Heading3             | 5.1 JWT (JSON Web Tokens)
+[341] P  Normal               | **Algoritmo:** RS256 (RSA Signature with SHA-256)
+[342] P  Normal               | **TTL:**
+[343] P  ListBullet           | JWT Client: 60 secondi
+[344] P  ListBullet           | JWT Vendor: 60 secondi
+[345] P  ListBullet           | Refresh Token: 1 ora
+[346] P  Normal               | **Payload JWT Client:**
+[347] P  Normal               | {  "iss": "bk-service",  "sub": "client_123",  "aud": "bk-client-library",  "exp": 1717941
+[348] P  Heading3             | 5.2 License Key – Generazione
+[349] P  Normal               | **Algoritmo:** HMAC-SHA256
+[350] P  Normal               | license_key = "lk_" + HMAC_SHA256(  random_uuid +   timestamp_epoch +  vat_number +  count
+[351] P  Normal               | **Lunghezza:** 67 caratteri (3 prefix + 64 hash)
+[352] P  Normal               | **Proprietà:**
+[353] P  ListBullet           | Univoco per cliente + prodotto
+[354] P  ListBullet           | Non predibile (dipende da random_uuid)
+[355] P  ListBullet           | Verificabile (HMAC)
+[356] P  ListBullet           | Non contiene dati sensibili in chiaro
+[357] P  Heading3             | 5.3 OTP (One Time Password)
+[358] P  Normal               | **Generazione:** 6 cifre numeriche (000000-999999)
+[359] P  Normal               | **TTL:** 15 minuti
+[360] P  Normal               | **Max tentativi falliti:** 3 (then blocco 30 minuti)
+[361] P  Normal               | **Storage:** Hashato con SHA256 nel DB (non in chiaro)
+[362] P  Heading3             | 5.4 API Key Vendor – Hashing e Storage
+[363] P  Normal               | **Generazione:** UUID4 + random_32_hex_chars
+[364] P  Normal               | api_key = "bk_" + UUID4() + "_" + random_32_hex()Esempio: bk_550e8400-e29b-41d4-a716-44665
+[365] P  Normal               | **Storage:** Hashato con bcrypt (rounds=12) in `vendors.api_key_hash`
+[366] P  Normal               | hashed = bcrypt.hashpw(api_key.encode(), bcrypt.gensalt(rounds=12))
+[367] P  Heading3             | 5.5 Rate Limiting
+[368] P  Normal               | **Tabella: `rate_limits` (NUOVO)**
+[369] T   4 rows          | Endpoint | Limite | Finestra | Chiave
+[370] P  Normal               | **Soft block:** 30 minuti dopo raggiungimento limite.
+[371] P  Normal               | **Response:** HTTP 429 Too Many Requests con header `Retry-After`
+[372] P  Heading3             | 5.6 HTTPS/TLS
+[373] P  Normal               | **Requisito:** Tutte le comunicazioni DEVONO essere HTTPS (TLS 1.2+)
+[374] P  Normal               | **HSTS:** Abilitato (`Strict-Transport-Security: max-age=31536000`)
+[375] P  Normal               | ---
+[376] P  Heading2             | 6. SEZIONE NUOVA – DESIGN API COMPLETATO
+[377] P  Heading3             | 6.1 Response di C1 per client già registrato
+[378] P  Normal               | Quando client chiama C1 con vat_number + product_key che esiste già:
+[379] P  Normal               | HTTP 201 Created{  "status": "already_registered",  "message": "Cliente già registrato. Li
+[380] P  Heading3             | 6.2 Paginazione F3 (registrations/new)
+[381] P  Normal               | **Query:** `GET /api/vendor/registrations/new?page=1&limit=50`
+[382] P  Normal               | **Response:**
+[383] P  Normal               | {  "registrations": [...],  "pagination": {    "total": 127,    "page": 1,    "limit": 50,
+[384] P  Heading3             | 6.3 Response di C4 quando licenza appena scaduta
+[385] P  Normal               | HTTP 200 OK{  "license_key": "lk_...",  "status": "expired",  "expires_at": "2026-06-08T23
+[386] P  Normal               | **Nota:** `just_expired: true` indica che il cambio di stato è avvenuto in questa stessa c
+[387] P  Normal               | ---
+[388] P  Heading2             | 7. SEZIONE NUOVA – NUOVI ENDPOINT
+[389] P  Heading3             | 7.1 C7 – POST /api/client/change-email
+[390] P  Normal               | **Uso:** Cliente cambia indirizzo email di contatto
+[391] P  Normal               | **Request:**
+[392] P  Normal               | {  "new_email": "newemail@acme.com"}
+[393] P  Normal               | **Success Response (200 OK):**
+[394] P  Normal               | {  "message": "Codice di verifica inviato al nuovo indirizzo",  "new_email": "newemail@acm
+[395] P  Normal               | **Flusso:**
+[396] P  Normal               | 1. Genera OTP e invia a new_email
+[397] P  Normal               | 2. Client verifica OTP con C7b (verify-email-change)
+[398] P  Normal               | 3. Aggiorna clients.contact_email
+[399] P  Heading3             | 7.2 F9 – POST /api/vendor/auth/rotate-key
+[400] P  Normal               | **Uso:** Vendor genera nuova API key e revoca la vecchia
+[401] P  Normal               | **Request:**
+[402] P  Normal               | {  "revoke_old_key": true}
+[403] P  Normal               | **Success Response (200 OK):**
+[404] P  Normal               | {  "message": "Nuova API key generata",  "new_api_key": "bk_550e8400-..._3f5c8a1b...",  "w
+[405] P  Normal               | **Flusso:**
+[406] P  Normal               | 1. Genera nuova API key
+[407] P  Normal               | 2. Hashata con bcrypt e salvata in DB
+[408] P  Normal               | 3. Invalida vecchia key
+[409] P  Normal               | 4. Ritorna nuova key UNA SOLA VOLTA
+[410] P  Normal               | ---
+[411] P  Heading2             | 8. SEZIONE NUOVA – SCENARI EDGE-CASE
+[412] P  Heading3             | 8.1 GET ALARM (O1) fallisce per 24 ore
+[413] P  Normal               | **Scenario:** Client verifica OTP (C2), ma server non riesce a notificare ERP
+[414] P  Normal               | **Azioni:**
+[415] P  ListBullet           | Licenza creata con vendor_synced = false
+[416] P  ListBullet           | O1 ritentato automaticamente ogni 15 minuti
+[417] P  ListBullet           | Max 3 tentativi
+[418] P  ListBullet           | Dopo max retry, email fallback inviata al fornitore
+[419] P  Heading3             | 8.2 C2 fallimento parziale (O1 non termina)
+[420] P  Normal               | **Scenario:** C2 crea licenza, ma O1 (GET ALARM) timeout
+[421] P  Normal               | **Response al client:**
+[422] P  Normal               | HTTP 500 Internal Server Error{  "error_code": "GET_ALARM_FAILED",  "message": "Licenza cr
+[423] P  Normal               | **IMPORTANTE:** Anche se status è 500, client riceve JWT e license_key. Licenza è nel DB c
+[424] P  Heading3             | 8.3 Passaggio Provisional → Standard
+[425] P  Normal               | **Scenario:** Cliente ha licenza provvisoria (30 giorni), paga il rinnovo, vendor chiama F
+[426] P  Normal               | **Logica F5:**
+[427] P  Normal               | 1. Disattiva vecchia: contratti.status = expired
+[428] P  Normal               | 2. Crea nuova: license_type = standard
+[429] P  Normal               | 3. Genera nuovo offline_token
+[430] P  Normal               | 4. Ritorna HTTP 201 Created
+[431] P  Normal               | **Bonus:** F5 è idempotente, quindi se vendor ritenta → STESSA risposta, zero duplicati.
+[432] P  Heading3             | 8.4 Timeout F5 + Idempotency Recovery
+[433] P  Normal               | **Scenario:** Vendor chiama F5, licenza creata, ma risposta timeout
+[434] P  Normal               | **Tentativo 1:**
+[435] P  ListBullet           | POST con Idempotency-Key: "activate_order_12345_20260608"
+[436] P  ListBullet           | Licenza creata ✅
+[437] P  ListBullet           | Response salvata in idempotency_keys ✅
+[438] P  ListBullet           | Ma timeout, client non riceve
+[439] P  Normal               | **Tentativo 2** (vendor ritenta con STESSA key):
+[440] P  ListBullet           | Query idempotency_keys → trovato!
+[441] P  ListBullet           | Ritorna STESSA response (201 Created)
+[442] P  ListBullet           | Zero duplicati
+[443] P  Heading3             | 8.5 Cliente offline > 7 giorni
+[444] P  Normal               | **Scenario:** Client non fa C4 da 7 giorni (offline, vacanza, app non usato)
+[445] P  Normal               | **Azioni:**
+[446] P  ListBullet           | T7: Monitoraggio inattività (C5) scatta → Email al fornitore
+[447] P  ListBullet           | T10: offline_token scade (T0 + license_check_frequency_days)
+[448] P  Normal               | **Domanda aperta (team decision):**
+[449] P  ListBullet           | Mode 1: Blocco immediato → App non funziona offline
+[450] P  ListBullet           | Mode 2: Modalità di grazia 3 giorni → App continua con avviso
+[451] P  ListBullet           | Mode 3: Downgrade funzioni → Solo moduli essenziali
+[452] P  Normal               | ---
+[453] P  Heading2             | 9. Riepilogo endpoint
+[454] P  Heading3             | Endpoint Client (C)
+[455] T   8 rows          | Codice | Metodo | Path | Descrizione | Status
+[456] P  Heading3             | Endpoint Fornitore (F)
+[457] T   8 rows          | Codice | Metodo | Path | Descrizione | Status
+[458] P  Heading3             | Endpoint uscente (O)
+[459] T   2 rows          | Codice | Metodo | Path | Descrizione
+[460] P  Normal               | ---
+[461] P  Heading2             | 10. Riepilogo tabelle DB
+[462] T  16 rows          | Tabella | Scopo | Status
+[463] P  Normal               | ---
+[464] P  Heading2             | 11. Domande aperte (priorità bassa)
+[465] P  ListBullet           | Quale provider email usare (SendGrid, Mailgun, ecc.)?
+[466] P  ListBullet           | Quale servizio esterno per validazione P.IVA (VIES per EU)?
+[467] P  ListBullet           | Pannello di amministrazione per il Service Invoice: sì o no?
+[468] P  ListBullet           | Offline expiry behavior: blocco immediato vs grazia 3 giorni?
+[469] P  Normal               | ---
+[470] P  Normal               | **Documento v2 Aggiornata — 08/06/2026**
+[471] P  Normal               | **Mantiene v2 originale + sezioni 3-8 (Error Handling, Idempotenza, Sicurezza, Design API,
+[472] P  Normal               | **Pronto per presentazione e implementazione**
