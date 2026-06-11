@@ -1,0 +1,30 @@
+{
+  "name": "bk-shield-backend",
+  "version": "1.0.0",
+  "description": "BK SHIELD — Servizio Gestione Licenze",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "test": "jest",
+    "test:watch": "jest --watch"
+  },
+  "author": "Andrea Pavan",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.17.0",
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^12.10.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "node-cron": "^4.2.1",
+    "nodemailer": "^8.0.11",
+    "uuid": "^14.0.0"
+  },
+  "devDependencies": {
+    "jest": "^30.4.2",
+    "nodemon": "^3.1.14",
+    "supertest": "^7.2.2"
+  }
+}
