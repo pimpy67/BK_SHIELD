@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 
-router.use('/vendor', require('./vendor'));
+router.use('/', require('./auth'));
+router.use('/', require('./products'));
 
 module.exports = router;
