@@ -5,6 +5,7 @@ const required = [
     'JWT_PUBLIC_KEY_PATH',
     'LICENSE_KEY_HMAC_SECRET',
     'OFFLINE_TOKEN_AES_KEY',
+    'CREDENTIALS_KEY',
 ];
 
 for (const key of required) {
@@ -27,6 +28,7 @@ module.exports = {
     crypto: {
       hmacSecret: process.env.LICENSE_KEY_HMAC_SECRET,
       aesKey: process.env.OFFLINE_TOKEN_AES_KEY,
+      credentialsKey: process.env.CREDENTIALS_KEY,
       bcryptRounds: parseInt(process.env.BCRYPT_ROUNDS) || 12,
     },
     otp: {
