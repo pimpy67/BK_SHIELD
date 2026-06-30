@@ -4,6 +4,19 @@ const env = require('../config/env');
 const { createOtp, verifyOtp, isLockedOut, recordFailedAttempt } = require('../services/otpService');
 const { createTrialLicense } = require('../services/licenseService');
 const { sendEmail, renderTemplate } = require('../services/emailService');
+const { signAccessToken, generateRefreshToken, hashToken } = require('../services/tokenService');
+
+async function issueClientTokens(clientId) {
+  const accessToken = signAccessToken({ sub: clientId, type: 'client' });
+  const refreshToken = generateRefreshToken();
+  const expiresAt = new Date(Date.now() + env.jwt.refreshTtlSeconds * 1000).toISOString();
+  await db('client_tokens').insert({
+    client_id: clientId,
+    token_hash: hashToken(refreshToken),
+    expires_at: expiresAt,
+  });
+  return { accessToken, refreshToken };
+}
 
 const EU_COUNTRIES = new Set(['AT','BE','BG','CY','CZ','DE','DK','EE','EL','ES','FI','FR','HR','HU','IE','IT','LT','LU','LV','MT','NL','PL','PT','RO','SE','SI','SK']);
 
@@ -125,15 +138,19 @@ async function verifyOtpEndpoint(req, res, next) {
       });
     }
 
-    // Idempotenza: se già attivo, restituisce la licenza esistente
+    // Idempotenza: se già attivo, restituisce la licenza esistente + nuovi token
     if (client.registration_status === 'active') {
-      const product = await db('products').where({ id: client.product_id }).first();
       const license = await db('licenses')
         .where({ client_id: client.id })
         .whereIn('status', ['active', 'suspended'])
         .first();
       const setup = await db('vendor_general_setup').first();
+      const { accessToken, refreshToken } = await issueClientTokens(client.id);
       return res.status(200).json({
+        access_token: accessToken,
+        token_type: 'Bearer',
+        expires_in: env.jwt.ttlSeconds,
+        refresh_token: refreshToken,
         license_key: license.license_key,
         type: license.type,
         status: license.status,
@@ -185,11 +202,15 @@ async function verifyOtpEndpoint(req, res, next) {
       last_seen_at: new Date().toISOString(),
     });
 
-    // Email di benvenuto non bloccante
     sendWelcomeEmail(product.vendor_id, client.email, client.name, licenseData).catch(() => {});
 
     const setup = await db('vendor_general_setup').first();
+    const { accessToken, refreshToken } = await issueClientTokens(client.id);
     return res.status(200).json({
+      access_token: accessToken,
+      token_type: 'Bearer',
+      expires_in: env.jwt.ttlSeconds,
+      refresh_token: refreshToken,
       license_key: licenseData.license_key,
       type: licenseData.type,
       status: licenseData.status,
